@@ -1,0 +1,21 @@
+o = build
+s = .
+cc = clang
+sdk = ViGEmBusSDK
+
+cflags = -Wall -I. -I$sdk/include
+libs = -lwinmm -lsetupapi
+
+rule cc
+    command = $cc $cflags -c $in -o $out
+
+rule link
+    command = $cc -o $out $in $libs
+
+build $o/main.o: cc $s/main.c
+
+build $o/sdk.o: cc $sdk/src/ViGEmClient.cpp
+
+build out.exe: link $o/main.o $o/sdk.o
+
+default out.exe
