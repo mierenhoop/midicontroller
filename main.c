@@ -2,13 +2,25 @@
 
 #include <assert.h>
 #include <conio.h>
+#include <stdint.h>
 #include <stdio.h>
-
 
 #include <ViGEm/Client.h>
 
 PVIGEM_CLIENT client;
 PVIGEM_TARGET pad;
+
+XUSB_REPORT report;
+
+static const int turningspeed = 4000;
+
+short safeadd(short x, short y) {
+  short ret = (x < 0) ? INT16_MIN : INT16_MAX;
+  short comp = ret - x;
+  if ((x < 0) == (y > comp))
+    ret = x + y;
+  return ret;
+}
 
 void CALLBACK MidiInProc(HMIDIIN hMidiIn, UINT wMsg, DWORD dwInstance,
                          DWORD dwParam1, DWORD dwParam2) {
@@ -21,18 +33,53 @@ void CALLBACK MidiInProc(HMIDIIN hMidiIn, UINT wMsg, DWORD dwInstance,
     printf("wMsg=MIM_CLOSE\n");
     break;
   case MIM_DATA: {
-    XUSB_REPORT report;
-    memset(&report, 0, sizeof(report));
-    if (dwParam1 == 0x007f1990) {
-      report.wButtons |= 0x1000;
+    // Left disc (turn)
+    if (dwParam1 == 0x000130b0 || dwParam1 == 0x000132b0) {
+      report.sThumbLX = safeadd(report.sThumbLX, turningspeed);
     }
-    if ((dwParam1&0xffff) == 0x39b0) {
-        int e = ((dwParam1 & 0x00ff0000) >> 8);
-        printf("%d", e * 2 - 0xffff / 2 - 1);
-        report.sThumbLX = e * 2 - 0xffff / 2 - 1;
+    else if (dwParam1 == 0x007f30b0 || dwParam1 == 0x007f32b0) {
+      report.sThumbLX = safeadd(report.sThumbLX, -turningspeed);
+      // Sync left disc (reset turn)
     }
-    printf("wMsg=MIM_DATA, dwInstance=%08x, dwParam1=%08x, dwParam2=%08x\n",
-           dwInstance, dwParam1, dwParam2);
+    else if (dwParam1 == 0x007f1790) {
+      report.sThumbLX = 0;
+      // Right volume (speed)
+    }
+    else if ((dwParam1 & 0xffff) == 0x3bb0) {
+      char c = dwParam1 >> 16;
+      if (c > 80) {
+        report.wButtons |= 0x1000;
+        report.wButtons &= ~0x2000;
+      } else if (c > 40) {
+        report.wButtons &= ~0x1000;
+        report.wButtons &= ~0x2000;
+      } else {
+        report.wButtons &= ~0x1000;
+        report.wButtons |= 0x2000;
+      }
+      // Drift
+    }
+    else if (dwParam1 == 0x007f1a90) {
+      report.wButtons |= 0x0200;
+    }
+    else if (dwParam1 == 0x00001a90) {
+      report.wButtons &= ~0x0200;
+    }
+    else if (dwParam1 == 0x007f3690) {
+      report.wButtons |= 0x0001;
+    }
+    else if (dwParam1 == 0x00003690) {
+      report.wButtons &= ~0x0001;
+    }
+    else if (dwParam1 == 0x007f3790) {
+      report.wButtons |= 0x0002;
+    }
+    else if (dwParam1 == 0x00003790) {
+      report.wButtons &= ~0x0002;
+    }
+
+    printf("dwParam1=%08x, dwParam2=%08x\n", (unsigned)dwParam1,
+           (unsigned)dwParam2);
     vigem_target_x360_update(client, pad, report);
     break;
   }
@@ -47,6 +94,8 @@ void CALLBACK MidiInProc(HMIDIIN hMidiIn, UINT wMsg, DWORD dwInstance,
 int main(int argc, char *argv[]) {
   HMIDIIN handle;
   int c = 0;
+
+  memset(&report, 0, sizeof(report));
 
   assert(midiInGetNumDevs() > 0);
 
